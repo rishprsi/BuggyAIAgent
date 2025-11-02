@@ -69,6 +69,8 @@ When a user asks a question or makes a request, make a function call plan. You c
 - Execute Python files with optional arguments
 - Write or overwrite files
 
+Using this function call plan help the user with their query, based on the available functions, otherwise respond with message that says that you can't perform the required task.
+
 All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons.
 """
     api_key = os.getenv("GEMINI_API_KEY")
@@ -87,27 +89,47 @@ All paths you provide should be relative to the working directory. You do not ne
     messages = [
             types.Content(role="user", parts=[types.Part(text=user_prompt)]),
             ]
+    count = 0
+    while count < 20:
+        result = client.models.generate_content(model=model,contents=messages, config=types.GenerateContentConfig(system_instruction = system_prompt, tools = [available_functions]))
+
+        if result.text:
+            print(result.text)
+            break
+
+        for candidate in result.candidates:
+            messages.append(candidate.content)
+
+
+        function_calls = result.function_calls
+
+
+        if result.function_calls:
+            for function_call in result.function_calls:
+                function_result = call_function(function_call, debug_mode)
+
+                    # print(f"Calling function: {function_call.name}({function_call.args})")
+                if function_result.parts[0] and function_result.parts[0].function_response.response['result']:
+                    messages.append(types.Content(role="user", parts=[types.Part(text=function_result.parts[0].function_response.response['result'])]))
+
+                    if debug_mode:
+                        print(f"-> {function_result.parts[0].function_response.response}")
+                else:
+                    raise Exception("Invalid function call")
+
+        if (debug_mode):
+            prompt_tokens = result.usage_metadata.prompt_token_count
+            cand_tokens = result.usage_metadata.candidates_token_count
+            print(f"User prompt: {user_prompt}")
+            print(f"Prompt tokens: {prompt_tokens}")
+            print(f"Response tokens: {cand_tokens}")
+
+
+
+        count+=1
     
-    result = client.models.generate_content(model=model,contents=messages, config=types.GenerateContentConfig(system_instruction = system_prompt, tools = [available_functions]))
-    function_calls = result.function_calls
-    if function_calls:
-        for function_call in function_calls:
-            function_result = call_function(function_call, debug_mode)
-            # print(f"Calling function: {function_call.name}({function_call.args})")
-            if function_result.parts[0] and function_result.parts[0].function_response.response:
-                if debug_mode:
-                    print(f"-> {function_result.parts[0].function_response.response}")
-            else:
-                raise Exception("Invalid function call")
-
-    if (debug_mode):
-        prompt_tokens = result.usage_metadata.prompt_token_count
-        cand_tokens = result.usage_metadata.candidates_token_count
-        print(f"User prompt: {user_prompt}")
-        print(f"Prompt tokens: {prompt_tokens}")
-        print(f"Response tokens: {cand_tokens}")
-
-
+        
+    
 def define_functions(name, description,parameter_type, properties_dict):
     properties = {}
     for property in properties_dict.items():
